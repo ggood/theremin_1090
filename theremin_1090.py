@@ -3,6 +3,7 @@
 import io
 import math
 from optparse import OptionParser
+import random
 import socket
 import sys
 import time
@@ -74,14 +75,31 @@ def deg2rad(deg):
   return deg * (math.pi / 180)
 
 
+def clean_aircraft_map(aircraft_map):
+  now = time.time()
+  for aircraft_id, (last_heard, _) in aircraft_map.items():
+    if now - last_heard > 60:
+      print "Aged out %s" % aircraft_id
+      del(aircraft_map[aircraft_id])
+
+
 def loop(options):
   print "Using lat/long of %s %s" % (options.my_latitude, options.my_longitude)
+  aircraft_map = {}  # Aircraft id -> (last_heard, channel)
   pygame.midi.init()
   if options.device == -1:
     device = pygame.midi.get_default_output_id()
   else:
     device = options.device
   m = pygame.midi.Output(device)
+  m.set_instrument(12, 0)
+  m.set_instrument(13, 1)
+  m.set_instrument(24, 2)
+  m.set_instrument(46, 3)
+  m.set_instrument(12, 4)
+  m.set_instrument(13, 5)
+  m.set_instrument(24, 6)
+  m.set_instrument(46, 7)
   dump1090 = Dump1090Endpoint("192.168.2.145", 30003)
   try:
       while True:
@@ -113,10 +131,16 @@ def loop(options):
         note = int(map_range(constrain(altitude, 0, 32000), 0, 32000, 30, 100))
         dist = ground_distance(options.my_latitude, options.my_longitude, latitude, longitude)
         velocity = int(map_range(constrain(dist, 0, 100), 0, 100, 127, 0))
-        print "%s %s %s %s (@%s km) -> %d (vel %s)" % (aircraft_id, altitude, latitude, longitude, dist, note, velocity)
-        m.note_on(note, velocity)
+        if aircraft_id in aircraft_map:
+          _, midi_channel = aircraft_map[aircraft_id]
+        else:
+          midi_channel = random.choice(range(8))
+        aircraft_map[aircraft_id] = (time.time(), midi_channel)
+        clean_aircraft_map(aircraft_map)
+        print "%s %s %s %s (@%s km) -> %d (vel %s, channel %s)" % (aircraft_id, altitude, latitude, longitude, dist, note, velocity, midi_channel)
+        m.note_on(note, velocity, midi_channel)
         time.sleep(0.025)
-        m.note_off(note, velocity)
+        m.note_off(note, velocity, midi_channel)
   finally:
     all_notes_off(m)
 
