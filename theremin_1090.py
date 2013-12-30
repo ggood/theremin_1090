@@ -5,10 +5,20 @@ import math
 from optparse import OptionParser
 import random
 import socket
+import string
 import sys
 import time
 
 import pygame.midi
+
+PENTA_NOTES = [
+  30, 32, 34, 37, 39,
+  42, 44, 46, 49, 51,
+  54, 56, 58, 61, 63,
+  66, 68, 70, 73, 75,
+  78, 80, 82, 85, 87,
+  90, 92, 94, 97, 99,
+]
 
 def list_devices():
   pygame.midi.init()
@@ -28,7 +38,7 @@ def list_devices():
       print "  Info: %s" % ", ".join(io_info)
     print
 
-class Dump1090Endpoint(object):
+class Dump1090NetworkEndpoint(object):
   def __init__(self, host, port):
     self._host = host 
     self._port = port
@@ -41,6 +51,19 @@ class Dump1090Endpoint(object):
 
   def close(self):
     self._buf.close()
+
+
+class Dump1090FileEndpoint(object):
+  def __init__(self, filename):
+    self._filename = filename 
+    self._buf = open(self._filename)
+
+  def readline(self):
+    return self._buf.readline()
+
+  def close(self):
+    self._buf.close()
+
 
 def constrain(value, minimum, maximum):
   if value < minimum:
@@ -82,6 +105,11 @@ def clean_aircraft_map(aircraft_map):
       print "Aged out %s" % aircraft_id
       del(aircraft_map[aircraft_id])
 
+def choose_pentatonic_note(altitude):
+  return  PENTA_NOTES[int(map_range(constrain(altitude, 0, 32000), 0, 32000, 0, len(PENTA_NOTES) - 1))]
+
+def choose_chromatic_note(altitude):
+  return  int(map_range(constrain(altitude, 0, 32000), 0, 32000, 30, 100))
 
 def loop(options):
   print "Using lat/long of %s %s" % (options.my_latitude, options.my_longitude)
@@ -96,14 +124,19 @@ def loop(options):
   m.set_instrument(13, 1)
   m.set_instrument(24, 2)
   m.set_instrument(46, 3)
-  m.set_instrument(12, 4)
-  m.set_instrument(13, 5)
-  m.set_instrument(24, 6)
-  m.set_instrument(46, 7)
-  dump1090 = Dump1090Endpoint("192.168.2.145", 30003)
+  m.set_instrument(76, 4)
+  m.set_instrument(92, 5)
+  m.set_instrument(102, 6)
+  m.set_instrument(104, 7)
+  if not options.file:
+      dump1090 = Dump1090NetworkEndpoint(options.host, options.port)
+  else:
+    dump1090 = Dump1090FileEndpoint(options.file)
   try:
       while True:
         line = dump1090.readline().strip()
+        if line == "":
+          return
         fields = line.split(",")
         if len(fields) < 22:
           continue
@@ -128,7 +161,7 @@ def loop(options):
           pass
         if latitude == 0.0 or longitude == 0.0:
           continue
-        note = int(map_range(constrain(altitude, 0, 32000), 0, 32000, 30, 100))
+        note = choose_pentatonic_note(altitude)
         dist = ground_distance(options.my_latitude, options.my_longitude, latitude, longitude)
         velocity = int(map_range(constrain(dist, 0, 100), 0, 100, 127, 0))
         if aircraft_id in aircraft_map:
@@ -151,6 +184,15 @@ def all_notes_off(device):
 
 if __name__ == "__main__":
     parser = OptionParser()
+    parser.add_option("-s", "--server",
+                      action="store", dest="host",
+                      default="127.0.0.1", help="host running dump1090")
+    parser.add_option("-p", "--port",
+                      action="store", dest="port",
+                      type=int, default=30003, help="port number for  dump1090")
+    parser.add_option("-f", "--file",
+                      action="store", dest="file",
+                      default=None, help="File of dump1090 data to read")
     parser.add_option("-d", "--device",
                       action="store", dest="device",
                       type=int, default=-1, help="device to use")
